@@ -32,6 +32,7 @@ services:
       # che riceve le variabili DB_* via environment al primo avvio su datadir vuoto.
       DB_IDEEINCUCINA:     ${DB_IDEEINCUCINA:-ideeincucina}
       DB_BLOG:             ${DB_BLOG:-blog_fblabs}
+      # <<< newapp: mariadb env >>>
     volumes:
       # Directory dati MariaDB dentro il repository:
       # utile per backup, migrazione e portabilità dello stack
@@ -81,12 +82,14 @@ services:
       # Credenziali custom esposte al runtime PHP
       WEBSERVER_ADMIN_USERNAME: ${WEBSERVER_ADMIN_USERNAME}
       WEBSERVER_ADMIN_PASSWORD: ${WEBSERVER_ADMIN_PASSWORD}
+      # <<< newapp: php env >>>
     volumes:
       # Codice applicativo montato nel container PHP.
       # Qui PHP-FPM legge ed esegue i file .php richiesti da Nginx.
       - ./volumes/ideeincucina/www:/var/www/html/ideeincucina
       - ./volumes/blog-fblabs/www:/var/www/html/blog-fblabs
       - ./volumes/viaggio-firenze-2026/www:/var/www/html/viaggio-firenze-2026
+      # <<< newapp: php volumes >>>
     networks:
       # Nessuna porta pubblicata: accessibile solo internamente via rete Docker
       - lemp_network
@@ -112,6 +115,7 @@ services:
       - ./volumes/ideeincucina/www:/var/www/html/ideeincucina:ro
       - ./volumes/blog-fblabs/www:/var/www/html/blog-fblabs:ro
       - ./volumes/viaggio-firenze-2026/www:/var/www/html/viaggio-firenze-2026:ro
+      # <<< newapp: nginx volumes >>>
     networks:
       # Rete condivisa per comunicare con PHP e con l'eventuale reverse proxy esterno
       - lemp_network
