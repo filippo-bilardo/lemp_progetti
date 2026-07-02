@@ -1,0 +1,125 @@
+# =============================================================================
+# Docker Compose — Stack LEMP (MariaDB + Nginx + PHP-FPM)
+#
+# Obiettivo:
+# - MariaDB gestisce la persistenza dati
+# - PHP-FPM esegue il codice PHP
+# - Nginx serve i file statici e inoltra le richieste PHP a PHP-FPM
+#
+# Prerequisito:
+# la rete esterna "nginx-proxy-network" deve esistere prima di avviare lo stack:
+#   docker network create nginx-proxy-network
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # DATABASE — MariaDB 10.11 (LTS)
+  # Le credenziali vengono iniettate tramite file .env (mai hardcoded).
+  # I dati vivono nel bind mount locale ./volumes/mysql_data, così restano
+  # persistenti anche se il container viene ricreato.
+  # ---------------------------------------------------------------------------
+  mariadb:
+    image: mariadb:10.11
+    container_name: lemp_mariadb
+    environment:
+      # Credenziali iniziali del server MariaDB
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER:          ${MYSQL_USER}
+      MYSQL_PASSWORD:      ${MYSQL_PASSWORD}
+      # Se MYSQL_DATABASE non è definita nel .env, il database non viene creato
+      # (stringa vuota è ignorata da MariaDB al primo avvio)
+      MYSQL_DATABASE:      ${MYSQL_DATABASE:-}
+    volumes:
+      # Directory dati MariaDB dentro il repository:
+      # utile per backup, migrazione e portabilità dello stack
+      - ./volumes/mysql_data:/var/lib/mysql
+      # Bootstrap automatico del database applicativo al primo avvio
+      # Eseguito solo quando il datadir e' vuoto.
+      - ./volumes/ideeincucina/www/inst/database.sql:/docker-entrypoint-initdb.d/20-ideeincucina.sql:ro
+    networks:
+      # Rete condivisa con gli altri servizi dello stack
+      - lemp_network
+    healthcheck:
+      # healthcheck.sh è incluso nell'immagine ufficiale mariadb dal tag 10.4+
+      # --connect      → verifica che il server accetti connessioni TCP
+      # --innodb_initialized → verifica che InnoDB abbia completato il recovery
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval:     30s   # Controlla ogni 30 s
+      timeout:      10s   # Fallisce se non risponde entro 10 s
+      retries:      3     # Marca "unhealthy" dopo 3 fallimenti consecutivi
+      start_period: 40s   # Grazia iniziale: non conta i fallimenti nei primi 40 s
+    restart: unless-stopped   # Riavvia sempre tranne se fermato manualmente
+
+  # ---------------------------------------------------------------------------
+  # PHP-FPM — Runtime PHP leggero basato su Alpine
+  # Esegue esclusivamente PHP: non espone porte HTTP dirette.
+  # Parte solo quando MariaDB è "healthy", così il runtime applicativo trova
+  # già disponibile il database al bootstrap.
+  # ---------------------------------------------------------------------------
+  php:
+    build:
+      # Build locale dell'immagine PHP-FPM personalizzata
+      context: .
+      dockerfile: dockerfile_php-fpm
+    image: lemp_php:latest   # Tag locale per riuso nelle build successive
+    container_name: lemp_progetti_php
+    depends_on:
+      mariadb:
+        condition: service_healthy   # Attende il healthcheck verde di MariaDB
+    environment:
+      # Variabili disponibili al runtime PHP/app
+      DB_HOST:     mariadb          # Nome del service = hostname DNS interno
+      DB_NAME:     ${MYSQL_DATABASE:-ideeincucina}
+      DB_USERNAME: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      # Credenziali custom esposte al runtime PHP
+      WEBSERVER_ADMIN_USERNAME: ${WEBSERVER_ADMIN_USERNAME}
+      WEBSERVER_ADMIN_PASSWORD: ${WEBSERVER_ADMIN_PASSWORD}
+    volumes:
+      # Codice applicativo montato nel container PHP.
+      # Qui PHP-FPM legge ed esegue i file .php richiesti da Nginx.
+      - ./volumes/ideeincucina/www:/var/www/html/ideeincucina
+      - ./volumes/blog-fblabs/www:/var/www/html/blog-fblabs
+      - ./volumes/viaggio-firenze-2026/www:/var/www/html/viaggio-firenze-2026
+    networks:
+      # Nessuna porta pubblicata: accessibile solo internamente via rete Docker
+      - lemp_network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # NGINX — Frontend HTTP leggero basato su Alpine
+  # Espone i siti in HTTP e inoltra i file PHP al servizio php.
+  # Questo container è il punto di ingresso dello stack ed è quello che
+  # hai voluto nominare "lemp_progetti".
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: lemp_progetti
+    depends_on:
+      # Nginx può partire dopo PHP, così il backend FastCGI è già risolvibile
+      - php
+    volumes:
+      # Configurazione Nginx letta in sola lettura
+      - ./volumes/nginx/conf.d:/etc/nginx/conf.d:ro
+      # Contenuto web in sola lettura: Nginx deve solo servire i file,
+      # non modificarli.
+      - ./volumes/ideeincucina/www:/var/www/html/ideeincucina:ro
+      - ./volumes/blog-fblabs/www:/var/www/html/blog-fblabs:ro
+      - ./volumes/viaggio-firenze-2026/www:/var/www/html/viaggio-firenze-2026:ro
+    networks:
+      # Rete condivisa per comunicare con PHP e con l'eventuale reverse proxy esterno
+      - lemp_network
+    restart: unless-stopped
+
+# =============================================================================
+# RETE — Bridge esterno condiviso
+# "external: true" significa che Docker Compose non crea e non distrugge
+# questa rete con up/down: deve già esistere sul daemon Docker.
+# =============================================================================
+networks:
+  lemp_network:
+    driver: bridge
+    external: true
+    name: nginx-proxy-network   # Nome reale della rete sul daemon Docker
+    

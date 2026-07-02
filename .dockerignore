@@ -1,0 +1,5 @@
+# In questa build serve solo il Dockerfile PHP-FPM.
+# Escludiamo il resto del repository per ridurre al minimo la build context.
+*
+!dockerfile_php-fpm
+!.dockerignore

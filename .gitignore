@@ -1,0 +1,18 @@
+# file di configurazione
+.env
+
+
+# Ignora la cartella .git e .github
+.github
+
+
+# file temporanei
+*.swp
+tmp/*
+
+# Volumi montati
+volumes/*
+
+# file di log
+*.log
+
