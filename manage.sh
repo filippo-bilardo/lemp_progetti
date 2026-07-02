@@ -10,9 +10,14 @@
 [ -f .env ] && source .env
 
 NOME_APP="LEMP Progetti"
-URL_WEB1="http://ideeincucina.filippobilardo.it"
-URL_WEB2="http://blog.filippobilardo.it"
-URL_WEB3="http://viaggio-firenze-2026.filippobilardo.it"
+
+# Legge gli URL delle app dai file .env_* (dinamico)
+APPS_URLS=()
+for f in .env_*; do
+    [ -f "$f" ] || continue
+    source "$f"
+    [ -n "$APP_DOMAIN" ] && APPS_URLS+=("http://${APP_DOMAIN}")
+done
 
 # =============================================================================
 show_usage() {
@@ -41,6 +46,9 @@ show_usage() {
     echo "  mariadb-list-db               - Lista tutti i database"
     echo "  mariadb-dump-db <database>    - Dump di un database in ./backup/"
     echo "  mariadb-restore-db <file.sql> - Ripristino da dump"
+    echo ""
+    echo "Comandi di pulizia:"
+    echo "  apps              - Elenca tutte le applicazioni registrate"
     echo ""
     echo "Comandi di pulizia:"
     echo "  clean             - Rimuove container, immagini e volumi (doppia conferma)"
@@ -119,9 +127,7 @@ case "$1" in
         echo ""
         echo "✅ Setup completato!"
         echo ""
-        echo "🌐 ${URL_WEB1}"
-        echo "🌐 ${URL_WEB2}"
-        echo "🌐 ${URL_WEB3}"
+        for url in "${APPS_URLS[@]}"; do echo "🌐 ${url}"; done
         echo ""
         ;;
 
@@ -130,9 +136,7 @@ case "$1" in
         echo "   docker compose up -d"
         docker compose up -d
         echo "✅ Stack avviato!"
-        echo "🌐 ${URL_WEB1}"
-        echo "🌐 ${URL_WEB2}"
-        echo "🌐 ${URL_WEB3}"
+        for url in "${APPS_URLS[@]}"; do echo "🌐 ${url}"; done
         ;;
 
     stop)
@@ -250,6 +254,27 @@ case "$1" in
             echo "❌ Errore durante il ripristino."
             exit 1
         fi
+        ;;
+
+# =============================================================================
+# APP
+# =============================================================================
+
+    apps)
+        echo ""
+        echo "📋 Applicazioni registrate:"
+        echo ""
+        if [ -f APPS.md ]; then
+            # Estrae la tabella da APPS.md (salta header e separatore)
+            sed -n '4,$p' APPS.md | while IFS='|' read -r slug dominio tipo db init_sql env_file; do
+                slug="${slug// /}"; dominio="${dominio// /}"
+                [ -z "$slug" ] && continue
+                printf "   %-25s %s\n" "${slug}" "${dominio}"
+            done
+        else
+            echo "   (nessuna app registrata in APPS.md)"
+        fi
+        echo ""
         ;;
 
 # =============================================================================

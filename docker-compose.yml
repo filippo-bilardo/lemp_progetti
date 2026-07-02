@@ -28,20 +28,20 @@ services:
       MYSQL_USER:          ${MYSQL_USER}
       MYSQL_PASSWORD:      ${MYSQL_PASSWORD}
       # MYSQL_DATABASE è stata rimossa: non supporta la gestione multi-database.
-      # I database vengono creati da volumes/mariadb/initdb.d/10-create-databases.sh
-      # che riceve le variabili DB_* via environment al primo avvio su datadir vuoto.
+      # I database vengono creati dagli script SQL in setup/mysql_<slug>/init.sql
+      # montati in /docker-entrypoint-initdb.d/ al primo avvio su datadir vuoto.
       DB_IDEEINCUCINA:     ${DB_IDEEINCUCINA:-ideeincucina}
-      DB_BLOG:             ${DB_BLOG:-blog_fblabs}
+      DB_BLOG_FBLABS:             ${DB_BLOG_FBLABS:-blog_fblabs}
       # <<< newapp: mariadb env >>>
     volumes:
       # Directory dati MariaDB dentro il repository:
       # utile per backup, migrazione e portabilità dello stack
       - ./volumes/mysql_data:/var/lib/mysql
-      # Bootstrap automatico al primo avvio su datadir vuoto.
-      # 10-create-databases.sh  — crea tutti i database e assegna i grant (IaC)
-      # 20-ideeincucina.sql     — carica lo schema iniziale di ideeincucina
-      - ./volumes/mariadb/initdb.d/10-create-databases.sh:/docker-entrypoint-initdb.d/10-create-databases.sh:ro
-      - ./volumes/ideeincucina/www/inst/database.sql:/docker-entrypoint-initdb.d/20-ideeincucina.sql:ro
+      # Per-app init SQL: ogni app fornisce il proprio bootstrap in setup/mysql_<slug>/
+      # Vengono eseguiti in ordine alfabetico al primo avvio su datadir vuoto.
+      - ./volumes/ideeincucina/setup/mysql_ideeincucina/init.sql:/docker-entrypoint-initdb.d/10-ideeincucina.sql:ro
+      - ./volumes/blog-fblabs/setup/mysql_blog-fblabs/init.sql:/docker-entrypoint-initdb.d/20-blog-fblabs.sql:ro
+      # <<< newapp: mariadb volumes >>>
     networks:
       # Rete condivisa con gli altri servizi dello stack
       - lemp_network
@@ -73,10 +73,10 @@ services:
       mariadb:
         condition: service_healthy   # Attende il healthcheck verde di MariaDB
     environment:
-      # Variabili disponibili al runtime PHP/app
+      # Variabili disponibili al runtime PHP/app — ogni app ha la propria variabile DB_<SLUG>
       DB_HOST:     mariadb                              # hostname DNS interno Docker
-      DB_NAME:     ${DB_IDEEINCUCINA:-ideeincucina}     # database sito ideeincucina
-      DB_BLOG:     ${DB_BLOG:-blog_fblabs}              # database sito blog-fblabs
+      DB_IDEEINCUCINA: ${DB_IDEEINCUCINA:-ideeincucina}  # database ideeincucina
+      DB_BLOG_FBLABS:     ${DB_BLOG_FBLABS:-blog_fblabs}              # database blog-fblabs
       DB_USERNAME: ${MYSQL_USER}
       DB_PASSWORD: ${MYSQL_PASSWORD}
       # Credenziali custom esposte al runtime PHP

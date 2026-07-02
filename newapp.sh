@@ -13,7 +13,7 @@
 #   4. (opzionale) Crea il database MariaDB:
 #        - aggiunge DB_<SLUG> in .env.example e .env
 #        - aggiunge il blocco CREATE DATABASE in
-#          volumes/mariadb/initdb.d/10-create-databases.sh
+#          volumes/<slug>/setup/mysql_<slug>/init.sql
 #        - aggiunge le variabili env a mariadb e php in docker-compose.yml
 #   5. Crea un file index placeholder (php o html)
 #   6. Mostra riepilogo e prossimi passi
@@ -48,8 +48,11 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "    volumes/<slug>/www/                         cartella sito"
     echo "    volumes/nginx/conf.d/<dominio>.conf         virtual host Nginx"
     echo "    docker-compose.yml                          bind mount nginx + php"
-    echo "    volumes/mariadb/initdb.d/10-create-db.sh   CREATE DATABASE (opz.)"
+    echo "    volumes/<slug>/setup/mysql_<slug>/init.sql       CREATE DATABASE per-app (opz.)"
     echo "    .env.example / .env                         DB_<SLUG>=... (opz.)"
+    echo "    .env_<slug>                                 file env dedicato app"
+    echo "    APPS.md                                     registro applicazioni"
+    echo "    volumes/<slug>/setup/mysql_<slug>/          init SQL per-app (opz.)"
     echo ""
     exit 0
 fi
@@ -170,6 +173,10 @@ hr
 step "Struttura cartelle"
 mkdir -p "volumes/${APP_SLUG}/www"
 success "volumes/${APP_SLUG}/www/"
+if [ "$HAS_DB" = "y" ]; then
+    mkdir -p "volumes/${APP_SLUG}/setup/mysql_${APP_SLUG}"
+    success "volumes/${APP_SLUG}/setup/mysql_${APP_SLUG}/"
+fi
 
 # ---------------------------------------------------------------------------
 # 2b. Virtual host Nginx
@@ -363,6 +370,12 @@ if has_db == 'y':
     mariadb_env    = f'      {db_var}:{" " * (13 - len(db_var))}${{{db_var}:-{db_name}}}'
     content = insert_before(content, mariadb_marker, mariadb_env)
 
+    # MariaDB volume: per-app init SQL
+    mariadb_vol_marker = '      # <<< newapp: mariadb volumes >>>'
+    init_sql_path = f'./volumes/{app_slug}/setup/mysql_{app_slug}/init.sql'
+    mariadb_vol   = f'      - {init_sql_path}:/docker-entrypoint-initdb.d/20-{app_slug}.sql:ro'
+    content = insert_before(content, mariadb_vol_marker, mariadb_vol)
+
     # PHP environment
     php_env_marker = '      # <<< newapp: php env >>>'
     var_suffix     = db_var.replace('DB_', '')
@@ -381,7 +394,7 @@ print('   ✅ docker-compose.yml aggiornato')
 PYEOF
 
 # ---------------------------------------------------------------------------
-# 2e. Database: .env.example, .env, 10-create-databases.sh
+# 2e. Database: .env.example, .env, init.sql
 # ---------------------------------------------------------------------------
 if [ "$HAS_DB" = "y" ]; then
     step "Configurazione database"
@@ -406,54 +419,55 @@ if [ "$HAS_DB" = "y" ]; then
         warn ".env non trovato — ricordati di aggiungerlo dopo: cp .env.example .env"
     fi
 
-    # 10-create-databases.sh — inserisce un nuovo blocco CREATE DATABASE
-    export DB_NAME DB_VAR APP_SLUG
-
-    python3 << 'PYEOF'
-import os, sys, re
-
-app_slug = os.environ['APP_SLUG']
-db_name  = os.environ['DB_NAME']
-db_var   = os.environ['DB_VAR']
-
-INIT_SH = 'volumes/mariadb/initdb.d/10-create-databases.sh'
-
-with open(INIT_SH, 'r') as f:
-    content = f.read()
-
-MARKER = '    -- Aggiungi qui i database dei nuovi siti seguendo lo stesso pattern'
-
-if MARKER not in content:
-    print(f'   ⚠  Marker non trovato in {INIT_SH}: aggiunta CREATE DATABASE saltata.')
-    print(f'   ⚠  Aggiungi manualmente il blocco per {db_name}.')
-    sys.exit(0)
-
-# Costruisce il blocco SQL con la sintassi bash-heredoc (\`)
-bash_var = '${' + db_var + ':-' + db_name + '}'
-new_block = (
-    f'\n'
-    f'    -- Database: {app_slug}\n'
-    f'    CREATE DATABASE IF NOT EXISTS \\`{bash_var}\\`\n'
-    f'        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n'
-    f'    GRANT ALL PRIVILEGES ON \\`{bash_var}\\`.* TO \'${{MYSQL_USER}}\'@\'%\';\n'
-)
-
-content = content.replace(MARKER, new_block + MARKER)
-
-# Aggiorna la riga echo finale con il nuovo db
-content = re.sub(
-    r'(echo "✅  Database creati: )(.+)(")',
-    lambda m: f'{m.group(1)}{m.group(2)}, {db_name}{m.group(3)}',
-    content
-)
-
-with open(INIT_SH, 'w') as f:
-    f.write(content)
-
-print(f'   ✅ 10-create-databases.sh  →  aggiunto blocco per {db_name}')
-PYEOF
+    # init.sql per-app — crea setup/mysql_<slug>/init.sql con CREATE DATABASE + GRANT
+    MYSQL_DIR="volumes/${APP_SLUG}/setup/mysql_${APP_SLUG}"
+    INIT_SQL="${MYSQL_DIR}/init.sql"
+    {
+        echo "-- ============================================================================="
+        echo "-- init.sql — Bootstrap database per ${APP_SLUG}"
+        echo "-- Generato da newapp.sh il $(date '+%d/%m/%Y')"
+        echo "-- ============================================================================="
+        echo ""
+        echo "CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`"
+        echo "    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+        echo "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${MYSQL_USER}'@'%';"
+        echo ""
+    } > "${INIT_SQL}"
+    success "${INIT_SQL}"
 
 fi
+
+# ---------------------------------------------------------------------------
+# 2f. App tracking — .env_<slug> + APPS.md
+# ---------------------------------------------------------------------------
+step "Registrazione app"
+
+# Crea .env_<slug>
+ENV_FILE=".env_${APP_SLUG}"
+{
+    echo "# App metadata — tracked in git"
+    echo "APP_SLUG=${APP_SLUG}"
+    echo "APP_DOMAIN=${DOMAIN}"
+    echo "APP_TYPE=${APP_TYPE}"
+    echo "DB_NAME=${DB_NAME}"
+    echo "DB_VAR=${DB_VAR}"
+    echo "DB_USER=\${MYSQL_USER}"
+    echo "DB_PASSWORD=\${MYSQL_PASSWORD}"
+} > "${ENV_FILE}"
+success "${ENV_FILE}"
+
+# Appende a APPS.md
+DB_INIT_SQL="volumes/${APP_SLUG}/setup/mysql_${APP_SLUG}/init.sql"
+if [ "$HAS_DB" = "y" ] && [ -f "${DB_INIT_SQL}" ]; then
+    INIT_SQL_REF="${DB_INIT_SQL}"
+else
+    INIT_SQL_REF="-"
+fi
+DB_NAME_DISPLAY="${DB_NAME:--}"
+DB_VAR_DISPLAY="${DB_VAR:--}"
+
+echo "| ${APP_SLUG} | ${DOMAIN} | ${APP_TYPE} | ${DB_NAME_DISPLAY} | ${INIT_SQL_REF} | ${ENV_FILE} |" >> APPS.md
+success "APPS.md  →  aggiunta riga per ${APP_SLUG}"
 
 # =============================================================================
 # 3. RIEPILOGO FINALE E PROSSIMI PASSI
@@ -468,10 +482,12 @@ echo "    ✅ volumes/${APP_SLUG}/www/"
 echo "    ✅ volumes/nginx/conf.d/${DOMAIN}.conf"
 [ "$APP_TYPE" = "php" ] && echo "    ✅ docker-compose.yml  (mount nginx :ro + php)"  \
                         || echo "    ✅ docker-compose.yml  (mount nginx :ro)"
+echo "    ✅ .env_${APP_SLUG}"
+echo "    ✅ APPS.md"
 if [ "$HAS_DB" = "y" ]; then
     echo "    ✅ .env.example  (${DB_VAR}=${DB_NAME})"
     [ -f .env ] && echo "    ✅ .env  (${DB_VAR}=${DB_NAME})"
-    echo "    ✅ volumes/mariadb/initdb.d/10-create-databases.sh"
+    echo "    ✅ volumes/${APP_SLUG}/setup/mysql_${APP_SLUG}/init.sql"
 fi
 
 echo ""

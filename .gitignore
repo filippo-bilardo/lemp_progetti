@@ -1,6 +1,6 @@
 # file di configurazione
 .env
-
+!.env.example
 
 # Ignora la cartella .git e .github
 .github/*
@@ -18,8 +18,10 @@ volumes/viaggio-firenze-2026/
 
 # I file di configurazione IaC in volumes/ SONO versionati:
 #   volumes/nginx/conf.d/   — configurazione Nginx
-#   volumes/mariadb/        — script di init database
 
 # file di log
 *.log
+
+# Prompt
+PROMPT.md
 

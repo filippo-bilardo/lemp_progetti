@@ -94,13 +94,15 @@ git push
 
 ## Siti attualmente serviti
 
-Il container espone internamente questi virtual host Nginx:
+Il container espone internamente i virtual host Nginx elencati in [APPS.md](APPS.md).
 
-| Dominio | Root nel container | Sorgente locale |
-| --- | --- | --- |
-| `ideeincucina.filippobilardo.it` | `/var/www/html/ideeincucina` | `./volumes/ideeincucina/www` |
-| `blog.filippobilardo.it` | `/var/www/html/blog-fblabs` | `./volumes/blog-fblabs/www` |
-| `viaggio-firenze-2026.filippobilardo.it` | `/var/www/html/viaggio-firenze-2026` | `./volumes/viaggio-firenze-2026/www` |
+| Slug | Dominio | Database | Init SQL |
+| --- | --- | --- | --- |
+| `ideeincucina` | `ideeincucina.filippobilardo.it` | `ideeincucina` | `volumes/ideeincucina/setup/mysql_ideeincucina/init.sql` |
+| `blog-fblabs` | `blog.filippobilardo.it` | `blog_fblabs` | - |
+| `viaggio-firenze-2026` | `viaggio-firenze-2026.filippobilardo.it` | - | - |
+
+> 💡 Per l'elenco completo e aggiornato, consulta [APPS.md](APPS.md). Ogni app ha un file `.env_<slug>` con i propri metadati (dominio, tipo, database).
 
 ---
 
@@ -165,9 +167,9 @@ nano .env
 | 3 | Chiede se rimuovere `./volumes/mysql_data/` per un bootstrap DB pulito | ✅ |
 | 4 | Esegue `docker compose up -d --build` | ✅ |
 
-Con un datadir vuoto, al primo avvio MariaDB esegue automaticamente in ordine alfabetico:
-- `volumes/mariadb/initdb.d/10-create-databases.sh` → crea **tutti** i database e assegna i grant (IaC)
-- `volumes/ideeincucina/www/inst/database.sql` → carica lo schema iniziale di ideeincucina
+Con un datadir vuoto, al primo avvio MariaDB esegue automaticamente gli script SQL in ordine alfabetico da ogni app in `setup/mysql_<slug>/init.sql`:
+- `volumes/ideeincucina/setup/mysql_ideeincucina/init.sql` → crea DB + schema ideeincucina
+- `volumes/blog-fblabs/setup/mysql_blog-fblabs/init.sql` → crea DB blog_fblabs
 
 ### Configurazione `.env`
 
@@ -180,43 +182,64 @@ MYSQL_PASSWORD=...
 
 # Un database per sito — aggiungi variabili al crescere dello stack
 DB_IDEEINCUCINA=ideeincucina
-DB_BLOG=blog_fblabs
+DB_BLOG_FBLABS=blog_fblabs
 
 WEBSERVER_ADMIN_USERNAME=admin
 WEBSERVER_ADMIN_PASSWORD=...
 ```
 
-> ⚠️ `MYSQL_DATABASE` è stata **rimossa**: supportava un solo database, rompendo il principio IaC per stack multi-sito. La gestione multi-database avviene tramite `volumes/mariadb/initdb.d/10-create-databases.sh`, versionato nel repository.
+> ⚠️ `MYSQL_DATABASE` è stata **rimossa**: supportava un solo database, rompendo il principio IaC per stack multi-sito. La gestione multi-database avviene tramite script SQL per-app in `volumes/<slug>/setup/mysql_<slug>/init.sql`.
 
-> 💡 **Aggiungere un nuovo database** = aggiungere `DB_<SITO>=nome_db` in `.env.example` e `.env`, poi aggiungere il blocco `CREATE DATABASE` / `GRANT` nello script di init e committare entrambi.
+> 💡 **Aggiungere un nuovo database** = aggiungere `DB_<SITO>=nome_db` in `.env.example` e `.env`, poi creare `volumes/<slug>/setup/mysql_<slug>/init.sql` con CREATE DATABASE + GRANT.
 
 > ⚠️ Non committare mai il file `.env` nel repository. È già incluso in `.gitignore`.
+
+> 💡 I file `.env_<slug>` (es. `.env_ideeincucina`) contengono metadati pubblici dell'app (slug, dominio, tipo, database) e **sono tracciati in git**. Fanno da registro machine-readable delle applicazioni.
 
 ---
 
 ## Aggiunta di nuovi siti
 
-Per aggiungere un nuovo sito seguendo il principio IaC:
+Per aggiungere un nuovo sito, usa lo script interattivo `newapp.sh`:
 
-1. Crea la directory per i file del sito nel repository:
+```bash
+./newapp.sh
+```
+
+Lo script segue il principio IaC e automatizza tutti i passi:
+
+| Passo | Azione |
+| --- | --- |
+| 1 | Crea `volumes/<slug>/www/` — directory del sito |
+| 2 | Crea `volumes/nginx/conf.d/<dominio>.conf` — virtual host Nginx |
+| 3 | Crea `volumes/<slug>/setup/mysql_<slug>/init.sql` — init SQL per-app (CREATE DATABASE + GRANT) |
+| 4 | Aggiorna `docker-compose.yml` — bind mount nginx, php e init SQL |
+| 5 | Aggiorna `.env.example` / `.env` — variabile `DB_<SLUG>` (se con DB) |
+| 6 | Crea `.env_<slug>` — file metadati app (tracciato in git) |
+| 7 | Aggiorna `APPS.md` — registro applicazioni |
+
+Dopo aver eseguito `newapp.sh`:
+
+1. Ricarica Nginx:
    ```bash
-   mkdir -p ./volumes/nuovo-sito/www
+   docker exec lemp_progetti nginx -s reload
    ```
-2. Aggiungi un nuovo bind mount in `docker-compose.yml` per il nuovo sito.
-3. Aggiungi un nuovo blocco `server` in `./volumes/nginx/conf.d/default.conf` con la configurazione del virtual host.
-4. Committa le modifiche nel repository:
+2. Se l'app usa PHP, riavvia lo stack:
+   ```bash
+   ./manage.sh restart
+   ```
+3. Se l'app usa database e MariaDB è già in esecuzione, crealo manualmente:
+   ```bash
+   ./manage.sh mariadb-root
+   ```
+4. Committa le modifiche IaC:
    ```bash
    git add .
-   git commit -m "aggiunge virtual host nuovo-sito"
+   git commit -m "feat: aggiunge app <slug> (<dominio>)"
    git push
    ```
-5. Riavvia lo stack per applicare le modifiche:
-   ```bash
-   docker compose restart
-   ```
-6. Nel pannello [Aruba Hosting](https://managehosting.aruba.it/), crea il nuovo dominio (es. `nuovo-sito.filippobilardo.it`) e punta i DNS verso l'IP del reverse proxy esterno (`163.192.115.36`).
-7. Disabilita il sito su eventuali proxy precedenti prima di richiedere un nuovo certificato SSL.
-8. Su [Nginx Proxy Manager](http://100.78.215.69:81/), aggiungi un nuovo proxy host che inoltri `nuovo-sito.filippobilardo.it` → `lemp_progetti:80`.
+5. Nel pannello [Aruba Hosting](https://managehosting.aruba.it/), crea il nuovo dominio (es. `nuovo-sito.filippobilardo.it`) e punta i DNS verso l'IP del reverse proxy esterno (`163.192.115.36`).
+6. Su [Nginx Proxy Manager](http://100.78.215.69:81/), aggiungi un nuovo proxy host che inoltri `nuovo-sito.filippobilardo.it` → `lemp_progetti:80`.
 
 ---
 
@@ -252,10 +275,14 @@ Per aggiungere un nuovo sito seguendo il principio IaC:
 | `docker-compose.yml` | Definizione dichiarativa dell'intero stack |
 | `dockerfile_php-fpm` | Immagine PHP-FPM custom (IaC: build riproducibile) |
 | `manage.sh` | Script di gestione: `setup`, `start`, `stop`, `build`, `logs`, shell, dump DB… |
+| `newapp.sh` | Script interattivo per aggiungere nuove applicazioni |
 | `.env.example` | Template variabili d'ambiente (versionato, senza segreti) |
 | `.gitignore` | Traccia i file IaC in `volumes/`; esclude `.env`, `mysql_data`, siti |
+| `.env_<slug>` | Metadati per-app (slug, dominio, tipo, db) — tracciati in git |
+| `APPS.md` | Registro di tutte le applicazioni gestite |
 | `volumes/nginx/conf.d/*.conf` | Configurazione virtual host Nginx (IaC, versionata) |
-| `volumes/mariadb/initdb.d/10-create-databases.sh` | Bootstrap multi-database MariaDB (IaC, versionato) |
+| `volumes/<slug>/setup/mysql_<slug>/init.sql` | Init SQL per-app (CREATE DATABASE + GRANT + schema) |
+| `volumes/<slug>/mysql_<slug>/init.sql` | Init SQL per-app (schema/bootstrap database) |
 | `.dockerignore` | Build context minima per l'immagine PHP |
 
 ---
@@ -278,6 +305,9 @@ docker compose up -d --build
 
 # Riavvio rapido
 ./manage.sh restart
+
+# Elenco applicazioni registrate
+./manage.sh apps
 
 # Log in tempo reale
 ./manage.sh logs
