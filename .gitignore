@@ -11,16 +11,11 @@
 *.swp
 tmp/*
 
-# Dati dei volumi — non versionati (dati runtime, submodule separati)
-volumes/mysql_data/*
-volumes/ideeincucina/
-volumes/blog-fblabs/
-volumes/viaggio-firenze-2026/
-!volumes/mysql_data/.gitkeep
-!volumes/nginx/conf.d/.gitkeep
-
-# I file di configurazione IaC in volumes/ SONO versionati:
-#   volumes/nginx/conf.d/   — configurazione Nginx
+# Dati dei volumi — non versionati (dati runtime)
+volumes/*
+!volumes/nginx/
+!volumes/nginx/**
+!volumes/*/.gitkeep
 
 # file di log
 *.log
