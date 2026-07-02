@@ -194,7 +194,7 @@ WEBSERVER_ADMIN_PASSWORD=...
 
 > ⚠️ Non committare mai il file `.env` nel repository. È già incluso in `.gitignore`.
 
-> 💡 I file `.env_<slug>` (es. `.env_ideeincucina`) contengono metadati pubblici dell'app (slug, dominio, tipo, database) e **sono tracciati in git**. Fanno da registro machine-readable delle applicazioni.
+> 💡 I file `.env_<slug>` (es. `.env_ideeincucina`) contengono metadati dell'app (slug, dominio, tipo, database). Sono esclusi da git (`.gitignore`), generati da `newapp.sh`.
 
 ---
 
@@ -278,7 +278,7 @@ Dopo aver eseguito `newapp.sh`:
 | `newapp.sh` | Script interattivo per aggiungere nuove applicazioni |
 | `.env.example` | Template variabili d'ambiente (versionato, senza segreti) |
 | `.gitignore` | Traccia i file IaC in `volumes/`; esclude `.env`, `mysql_data`, siti |
-| `.env_<slug>` | Metadati per-app (slug, dominio, tipo, db) — tracciati in git |
+| `.env_<slug>` | Metadati per-app (slug, dominio, tipo, db) — generati da newapp.sh, esclusi da git |
 | `APPS.md` | Registro di tutte le applicazioni gestite |
 | `volumes/nginx/conf.d/*.conf` | Configurazione virtual host Nginx (IaC, versionata) |
 | `volumes/<slug>/setup/mysql_<slug>/init.sql` | Init SQL per-app (CREATE DATABASE + GRANT + schema) |

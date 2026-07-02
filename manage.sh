@@ -11,12 +11,23 @@
 
 NOME_APP="LEMP Progetti"
 
-# Legge gli URL delle app dai file .env_* (dinamico)
+# Legge gli URL delle app — prima da APPS.md (IaC), poi sovrascritti da .env_* se esistono
 APPS_URLS=()
+if [ -f APPS.md ]; then
+    while IFS='|' read -r slug dominio tipo db init_sql env_file; do
+        dominio="${dominio// /}"
+        [ -n "$dominio" ] && [[ "$dominio" != Dominio ]] && APPS_URLS+=("http://${dominio}")
+    done < <(tail -n +4 APPS.md)
+fi
+# .env_* sovrascrivono/arricchiscono se presenti localmente
 for f in .env_*; do
     [ -f "$f" ] || continue
     source "$f"
-    [ -n "$APP_DOMAIN" ] && APPS_URLS+=("http://${APP_DOMAIN}")
+    found=false
+    for i in "${!APPS_URLS[@]}"; do
+        if [[ "${APPS_URLS[$i]}" == "http://${APP_DOMAIN}" ]]; then found=true; break; fi
+    done
+    $found || APPS_URLS+=("http://${APP_DOMAIN}")
 done
 
 # =============================================================================

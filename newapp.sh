@@ -445,7 +445,7 @@ step "Registrazione app"
 # Crea .env_<slug>
 ENV_FILE=".env_${APP_SLUG}"
 {
-    echo "# App metadata — tracked in git"
+    echo "# App metadata — locale (escluso da git, vedi .gitignore)"
     echo "APP_SLUG=${APP_SLUG}"
     echo "APP_DOMAIN=${DOMAIN}"
     echo "APP_TYPE=${APP_TYPE}"
