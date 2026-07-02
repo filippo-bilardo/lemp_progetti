@@ -27,15 +27,19 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_USER:          ${MYSQL_USER}
       MYSQL_PASSWORD:      ${MYSQL_PASSWORD}
-      # Se MYSQL_DATABASE non è definita nel .env, il database non viene creato
-      # (stringa vuota è ignorata da MariaDB al primo avvio)
-      MYSQL_DATABASE:      ${MYSQL_DATABASE:-}
+      # MYSQL_DATABASE è stata rimossa: non supporta la gestione multi-database.
+      # I database vengono creati da volumes/mariadb/initdb.d/10-create-databases.sh
+      # che riceve le variabili DB_* via environment al primo avvio su datadir vuoto.
+      DB_IDEEINCUCINA:     ${DB_IDEEINCUCINA:-ideeincucina}
+      DB_BLOG:             ${DB_BLOG:-blog_fblabs}
     volumes:
       # Directory dati MariaDB dentro il repository:
       # utile per backup, migrazione e portabilità dello stack
       - ./volumes/mysql_data:/var/lib/mysql
-      # Bootstrap automatico del database applicativo al primo avvio
-      # Eseguito solo quando il datadir e' vuoto.
+      # Bootstrap automatico al primo avvio su datadir vuoto.
+      # 10-create-databases.sh  — crea tutti i database e assegna i grant (IaC)
+      # 20-ideeincucina.sql     — carica lo schema iniziale di ideeincucina
+      - ./volumes/mariadb/initdb.d/10-create-databases.sh:/docker-entrypoint-initdb.d/10-create-databases.sh:ro
       - ./volumes/ideeincucina/www/inst/database.sql:/docker-entrypoint-initdb.d/20-ideeincucina.sql:ro
     networks:
       # Rete condivisa con gli altri servizi dello stack
@@ -69,8 +73,9 @@ services:
         condition: service_healthy   # Attende il healthcheck verde di MariaDB
     environment:
       # Variabili disponibili al runtime PHP/app
-      DB_HOST:     mariadb          # Nome del service = hostname DNS interno
-      DB_NAME:     ${MYSQL_DATABASE:-ideeincucina}
+      DB_HOST:     mariadb                              # hostname DNS interno Docker
+      DB_NAME:     ${DB_IDEEINCUCINA:-ideeincucina}     # database sito ideeincucina
+      DB_BLOG:     ${DB_BLOG:-blog_fblabs}              # database sito blog-fblabs
       DB_USERNAME: ${MYSQL_USER}
       DB_PASSWORD: ${MYSQL_PASSWORD}
       # Credenziali custom esposte al runtime PHP

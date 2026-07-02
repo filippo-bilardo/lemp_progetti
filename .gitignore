@@ -3,15 +3,22 @@
 
 
 # Ignora la cartella .git e .github
-.github
-
+.github/*
+!.github
 
 # file temporanei
 *.swp
 tmp/*
 
-# Volumi montati
-volumes/*
+# Dati dei volumi — non versionati (dati runtime, submodule separati)
+volumes/mysql_data/
+volumes/ideeincucina/
+volumes/blog-fblabs/
+volumes/viaggio-firenze-2026/
+
+# I file di configurazione IaC in volumes/ SONO versionati:
+#   volumes/nginx/conf.d/   — configurazione Nginx
+#   volumes/mariadb/        — script di init database
 
 # file di log
 *.log

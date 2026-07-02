@@ -136,77 +136,61 @@ lemp_progetti  (nginx:1.27-alpine)
 
 Questa sezione descrive come ricostruire l'intera infrastruttura partendo da zero su un host pulito, seguendo il principio IaC: **tutto ciò che serve è nel repository**.
 
-### Step 1 — Clona il repository
+Lo script `manage.sh` gestisce in modo **idempotente** tutti i passi della ricostruzione: può essere rieseguito senza effetti collaterali.
+
+### Metodo rapido — `./manage.sh setup`
 
 ```bash
 git clone git@github.com:filippo-bilardo/lemp_progetti.git
 cd lemp_progetti
+./manage.sh setup
 ```
 
-### Step 2 — Crea la rete Docker esterna
-
-La rete `nginx-proxy-network` deve esistere sull'host prima dell'avvio dello stack (è condivisa col reverse proxy esterno):
+Al primo avvio, `setup` crea `.env` da `.env.example` e si ferma chiedendo di valorizzare le variabili:
 
 ```bash
-docker network create nginx-proxy-network
+# → apri .env e imposta le password reali
+nano .env
+
+# riesegui per completare il deploy
+./manage.sh setup
 ```
 
-> ℹ️ Se la rete esiste già, il comando restituisce un errore non bloccante.
+### Cosa fa `./manage.sh setup` — passo per passo
 
-### Step 3 — Configura le variabili d'ambiente
+| Passo | Azione | Idempotente |
+| --- | --- | --- |
+| 1 | Crea la rete Docker `nginx-proxy-network` (se non esiste) | ✅ |
+| 2 | Crea `.env` da `.env.example` (se assente), poi si ferma per la configurazione | ✅ |
+| 3 | Chiede se rimuovere `./volumes/mysql_data/` per un bootstrap DB pulito | ✅ |
+| 4 | Esegue `docker compose up -d --build` | ✅ |
 
-Il file `.env` **non è versionato** (contiene segreti). Il file `.env.example` nel repository contiene tutte le variabili necessarie con valori segnaposto:
+Con un datadir vuoto, al primo avvio MariaDB esegue automaticamente in ordine alfabetico:
+- `volumes/mariadb/initdb.d/10-create-databases.sh` → crea **tutti** i database e assegna i grant (IaC)
+- `volumes/ideeincucina/www/inst/database.sql` → carica lo schema iniziale di ideeincucina
 
-```bash
-cp .env.example .env
-```
+### Configurazione `.env`
 
-Modifica `.env` valorizzando almeno:
+Dopo il primo `./manage.sh setup`, valorizza nel file `.env` almeno:
 
 ```dotenv
 MYSQL_ROOT_PASSWORD=...
 MYSQL_USER=lemp
 MYSQL_PASSWORD=...
-MYSQL_DATABASE=ideeincucina
+
+# Un database per sito — aggiungi variabili al crescere dello stack
+DB_IDEEINCUCINA=ideeincucina
+DB_BLOG=blog_fblabs
+
 WEBSERVER_ADMIN_USERNAME=admin
 WEBSERVER_ADMIN_PASSWORD=...
 ```
 
+> ⚠️ `MYSQL_DATABASE` è stata **rimossa**: supportava un solo database, rompendo il principio IaC per stack multi-sito. La gestione multi-database avviene tramite `volumes/mariadb/initdb.d/10-create-databases.sh`, versionato nel repository.
+
+> 💡 **Aggiungere un nuovo database** = aggiungere `DB_<SITO>=nome_db` in `.env.example` e `.env`, poi aggiungere il blocco `CREATE DATABASE` / `GRANT` nello script di init e committare entrambi.
+
 > ⚠️ Non committare mai il file `.env` nel repository. È già incluso in `.gitignore`.
-
-### Step 4 — (Opzionale) Ricostruzione pulita del database
-
-Se vuoi una ricostruzione davvero pulita del database, rimuovi il datadir persistente:
-
-```bash
-docker compose down
-rm -rf ./volumes/mysql_data
-```
-
-> ℹ️ Gli script in `/docker-entrypoint-initdb.d/` vengono eseguiti **solo al primo avvio** di MariaDB su un datadir vuoto. Se `./volumes/mysql_data` esiste già, il bootstrap SQL non viene rieseguito automaticamente.
-
-### Step 5 — Avvia lo stack
-
-```bash
-docker compose up -d --build
-```
-
-Con queste impostazioni, al primo avvio su datadir vuoto:
-- MariaDB crea automaticamente il database `ideeincucina`
-- L'utente applicativo riceve i grant sul database dichiarato in `.env`
-- Lo schema iniziale viene caricato da `./volumes/ideeincucina/www/inst/database.sql`
-- PHP usa `mariadb` come hostname interno Docker e le credenziali esposte via environment
-
-### Riepilogo rapido (tutto in un blocco)
-
-```bash
-git clone git@github.com:filippo-bilardo/lemp_progetti.git
-cd lemp_progetti
-docker network create nginx-proxy-network
-cp .env.example .env
-# → modifica .env con i valori reali
-docker compose up -d --build
-```
 
 ---
 
@@ -267,39 +251,39 @@ Per aggiungere un nuovo sito seguendo il principio IaC:
 | --- | --- |
 | `docker-compose.yml` | Definizione dichiarativa dell'intero stack |
 | `dockerfile_php-fpm` | Immagine PHP-FPM custom (IaC: build riproducibile) |
+| `manage.sh` | Script di gestione: `setup`, `start`, `stop`, `build`, `logs`, shell, dump DB… |
 | `.env.example` | Template variabili d'ambiente (versionato, senza segreti) |
-| `.gitignore` | Esclude `.env`, `mysql_data` e altri artefatti locali |
-| `volumes/nginx/conf.d/default.conf` | Virtual host Nginx (versionato) |
+| `.gitignore` | Traccia i file IaC in `volumes/`; esclude `.env`, `mysql_data`, siti |
+| `volumes/nginx/conf.d/*.conf` | Configurazione virtual host Nginx (IaC, versionata) |
+| `volumes/mariadb/initdb.d/10-create-databases.sh` | Bootstrap multi-database MariaDB (IaC, versionato) |
 | `.dockerignore` | Build context minima per l'immagine PHP |
-| `restart-with-backup.sh` | Dump DB + archivio config + restart stack |
-| `volumes/ideeincucina/setup/reset-ideeincucina-admin-password.sh` | Reset password admin sito ideeincucina |
 
 ---
 
 ## Avvio e gestione
 
-Avvio (con rebuild immagini):
+Tutti i comandi passano attraverso `manage.sh`:
 
 ```bash
+# Prima installazione / ricostruzione da zero
+./manage.sh setup
+
+# Avvio (con rebuild immagini)
+./manage.sh build && ./manage.sh start
+# oppure direttamente:
 docker compose up -d --build
-```
 
-Stop (preserva i volumi):
+# Stop (preserva i dati in ./volumes/)
+./manage.sh stop
 
-```bash
-docker compose down
-```
+# Riavvio rapido
+./manage.sh restart
 
-Stop con rimozione volumi (⚠️ distrugge il DB):
+# Log in tempo reale
+./manage.sh logs
 
-```bash
-docker compose down -v
-```
-
-Riavvio con backup automatico:
-
-```bash
-./restart-with-backup.sh
+# Stato container
+./manage.sh status
 ```
 
 Reset password admin `ideeincucina`:
