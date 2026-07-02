@@ -1,5 +1,6 @@
 # file di configurazione
 .env
+.env_*
 !.env.example
 
 # Ignora la cartella .git e .github
